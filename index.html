@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html>
+<head>
+
+  <meta charset="UTF-8">
+
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1">
+
+  <title>QAM Event Check-In</title>
+
+  <script src="https://unpkg.com/html5-qrcode"
+          type="text/javascript">
+  </script>
+
+  <style>
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: Arial, sans-serif;
+      background: #f5f7fb;
+      color: #111827;
+    }
+
+    .container {
+      max-width: 600px;
+      margin: auto;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+
+    .header h1 {
+      margin-bottom: 5px;
+    }
+
+    .header p {
+      color: #6b7280;
+    }
+
+    .card {
+      background: white;
+      padding: 20px;
+      border-radius: 16px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+    }
+
+    #reader {
+      width: 100%;
+      margin-top: 15px;
+    }
+
+    button {
+      width: 100%;
+      padding: 15px;
+      margin-top: 10px;
+      border: none;
+      border-radius: 10px;
+      background: #2563eb;
+      color: white;
+      font-size: 17px;
+      font-weight: bold;
+    }
+
+    button:disabled {
+      background: #9ca3af;
+    }
+
+    .secondary {
+      background: #6b7280;
+    }
+
+    input {
+      width: 100%;
+      padding: 14px;
+      border: 1px solid #d1d5db;
+      border-radius: 10px;
+      font-size: 16px;
+      margin-top: 8px;
+    }
+
+    .result {
+      margin-top: 20px;
+      padding: 20px;
+      border-radius: 14px;
+      display: none;
+    }
+
+    .success {
+      background: #dcfce7;
+      border: 1px solid #22c55e;
+    }
+
+    .warning {
+      background: #fef3c7;
+      border: 1px solid #f59e0b;
+    }
+
+    .error {
+      background: #fee2e2;
+      border: 1px solid #ef4444;
+    }
+
+    .name {
+      font-size: 26px;
+      font-weight: bold;
+      margin: 10px 0;
+    }
+
+    .info {
+      margin: 7px 0;
+      color: #4b5563;
+    }
+
+    .divider {
+      margin: 25px 0;
+      border-top: 1px solid #e5e7eb;
+    }
+
+  </style>
+
+</head>
+
+<body>
+
+<div class="container">
+
+  <div class="header">
+
+    <h1>QAM Event</h1>
+
+    <p>Registration Check-In</p>
+
+  </div>
+
+
+  <div class="card">
+
+    <button
+      id="startButton"
+      onclick="startScanner()">
+
+      📷 START CAMERA
+
+    </button>
+
+
+    <div id="reader"></div>
+
+
+    <div class="divider"></div>
+
+
+    <strong>Manual Check-In</strong>
+
+    <input
+      id="manualId"
+      placeholder="QAM-2026-00001"
+      autocomplete="off"
+    >
+
+    <button onclick="manualSearch()">
+
+      SEARCH REGISTRATION
+
+    </button>
+
+
+    <div
+      id="result"
+      class="result">
+
+      <h2 id="resultTitle"></h2>
+
+      <div id="resultContent"></div>
+
+      <button
+        id="checkInButton"
+        onclick="checkIn()"
+        style="display:none;">
+
+        ✅ CHECK IN
+
+      </button>
+
+      <button
+        class="secondary"
+        onclick="resetPage()">
+
+        SCAN / SEARCH ANOTHER
+
+      </button>
+
+    </div>
+
+  </div>
+
+</div>
+
+
+<script>
+
+/*
+ * IMPORTANT:
+ *
+ * Replace this URL with your
+ * Apps Script Web App URL.
+ *
+ * It must end with /exec
+ */
+
+const API_URL =
+  "https://script.google.com/macros/s/AKfycbyDUwW19d1NlslUnqgAHrbVO9qQ_W5JBWUTQAW8O25gq-98A4_DzisNs5viwCFN9yjd/exec";
+
+
+let currentRegistration = null;
+
+let scanner = null;
+
+let scanning = false;
+
+
+/*
+ * Start QR scanner.
+ */
+async function startScanner() {
+
+  const button =
+    document.getElementById(
+      "startButton"
+    );
+
+  button.disabled = true;
+
+  try {
+
+    scanner =
+      new Html5Qrcode("reader");
+
+
+    await scanner.start(
+
+      {
+        facingMode: "environment"
+      },
+
+      {
+        fps: 10,
+
+        qrbox: {
+          width: 250,
+          height: 250
+        }
+      },
+
+      onScanSuccess
+
+    );
+
+
+    scanning = true;
+
+    button.style.display = "none";
+
+  }
+
+  catch (error) {
+
+    console.error(error);
+
+    button.disabled = false;
+
+    showError(
+      "Camera could not be started. " +
+      "Please allow camera permission."
+    );
+
+  }
+
+}
+
+
+/*
+ * QR scanned.
+ */
+async function onScanSuccess(
+  decodedText
+) {
+
+  if (!scanning) {
+    return;
+  }
+
+  scanning = false;
+
+
+  try {
+
+    await scanner.stop();
+
+  }
+
+  catch (e) {
+
+    console.log(e);
+
+  }
+
+
+  findRegistration(
+    decodedText
+  );
+
+}
+
+
+/*
+ * Find registration.
+ */
+async function findRegistration(
+  registrationId
+) {
+
+  showLoading();
+
+
+  try {
+
+    const response =
+      await fetch(
+        API_URL +
+        "?action=find&id=" +
+        encodeURIComponent(
+          registrationId
+        )
+      );
+
+
+    const result =
+      await response.json();
+
+
+    showRegistration(result);
+
+  }
+
+  catch (error) {
+
+    console.error(error);
+
+    showError(
+      "Could not connect to the registration server."
+    );
+
+  }
+
+}
+
+
+/*
+ * Manual search.
+ */
+function manualSearch() {
+
+  const id =
+    document.getElementById(
+      "manualId"
+    ).value.trim();
+
+
+  if (!id) {
+
+    showError(
+      "Please enter a Registration ID."
+    );
+
+    return;
+  }
+
+
+  findRegistration(id);
+
+}
+
+
+/*
+ * Show registration.
+ */
+function showRegistration(
+  result
+) {
+
+  const box =
+    document.getElementById(
+      "result"
+    );
+
+  const title =
+    document.getElementById(
+      "resultTitle"
+    );
+
+  const content =
+    document.getElementById(
+      "resultContent"
+    );
+
+  const button =
+    document.getElementById(
+      "checkInButton"
+    );
+
+
+  box.style.display = "block";
+
+  button.style.display = "none";
+
+
+  if (!result.found) {
+
+    box.className =
+      "result error";
+
+    title.textContent =
+      "❌ NOT REGISTERED";
+
+    content.innerHTML = `
+      <p>
+        Registration ID:
+        <strong>
+          ${escapeHtml(
+            result.registrationId
+          )}
+        </strong>
+      </p>
+
+      <p>
+        This registration was not found.
+      </p>
+    `;
+
+    return;
+  }
+
+
+  currentRegistration =
+    result;
+
+
+  if (
+    result.status ===
+    "CHECKED_IN"
+  ) {
+
+    box.className =
+      "result warning";
+
+    title.textContent =
+      "⚠️ ALREADY CHECKED IN";
+
+    content.innerHTML = `
+      <div class="name">
+        ${escapeHtml(result.name)}
+      </div>
+
+      <div class="info">
+        ${escapeHtml(result.email)}
+      </div>
+
+      <div class="info">
+        Registration ID:
+        <strong>
+          ${escapeHtml(
+            result.registrationId
+          )}
+        </strong>
+      </div>
+
+      <div class="info">
+        Check-in time:
+        ${escapeHtml(
+          String(result.checkInTime)
+        )}
+      </div>
+    `;
+
+    return;
+  }
+
+
+  box.className =
+    "result success";
+
+  title.textContent =
+    "✅ REGISTERED";
+
+  content.innerHTML = `
+    <div class="name">
+      ${escapeHtml(result.name)}
+    </div>
+
+    <div class="info">
+      ${escapeHtml(result.email)}
+    </div>
+
+    <div class="info">
+      Registration ID:
+      <strong>
+        ${escapeHtml(
+          result.registrationId
+        )}
+      </strong>
+    </div>
+
+    <div class="info">
+      Status:
+      <strong>
+        NOT CHECKED IN
+      </strong>
+    </div>
+  `;
+
+
+  button.style.display =
+    "block";
+
+}
+
+
+/*
+ * Check in.
+ */
+async function checkIn() {
+
+  if (!currentRegistration) {
+    return;
+  }
+
+
+  const button =
+    document.getElementById(
+      "checkInButton"
+    );
+
+
+  button.disabled = true;
+
+  button.textContent =
+    "CHECKING IN...";
+
+
+  try {
+
+    const response =
+      await fetch(
+
+        API_URL +
+        "?action=checkin&id=" +
+        encodeURIComponent(
+          currentRegistration.registrationId
+        ),
+
+        {
+          method: "GET"
+        }
+
+      );
+
+
+    const result =
+      await response.json();
+
+
+    if (result.success) {
+
+      const box =
+        document.getElementById(
+          "result"
+        );
+
+      const title =
+        document.getElementById(
+          "resultTitle"
+        );
+
+      const content =
+        document.getElementById(
+          "resultContent"
+        );
+
+
+      box.className =
+        "result success";
+
+
+      title.textContent =
+        "✅ CHECK-IN SUCCESSFUL";
+
+
+      content.innerHTML = `
+        <div class="name">
+          ${escapeHtml(result.name)}
+        </div>
+
+        <div class="info">
+          ${escapeHtml(result.email)}
+        </div>
+
+        <div class="info">
+          Registration ID:
+          <strong>
+            ${escapeHtml(
+              result.registrationId
+            )}
+          </strong>
+        </div>
+
+        <div class="info">
+          Checked in successfully.
+        </div>
+      `;
+
+
+      button.style.display =
+        "none";
+
+    }
+
+
+    else if (
+      result.alreadyCheckedIn
+    ) {
+
+      showAlreadyChecked(
+        result
+      );
+
+    }
+
+  }
+
+  catch (error) {
+
+    console.error(error);
+
+    button.disabled = false;
+
+    button.textContent =
+      "✅ CHECK IN";
+
+    showError(
+      "Could not connect to server."
+    );
+
+  }
+
+}
+
+
+/*
+ * Already checked in.
+ */
+function showAlreadyChecked(
+  result
+) {
+
+  const box =
+    document.getElementById(
+      "result"
+    );
+
+  const title =
+    document.getElementById(
+      "resultTitle"
+    );
+
+  const content =
+    document.getElementById(
+      "resultContent"
+    );
+
+  const button =
+    document.getElementById(
+      "checkInButton"
+    );
+
+
+  box.className =
+    "result warning";
+
+
+  title.textContent =
+    "⚠️ ALREADY CHECKED IN";
+
+
+  content.innerHTML = `
+    <div class="name">
+      ${escapeHtml(result.name)}
+    </div>
+
+    <div class="info">
+      Registration ID:
+      <strong>
+        ${escapeHtml(
+          result.registrationId
+        )}
+      </strong>
+    </div>
+
+    <div class="info">
+      This person was already checked in.
+    </div>
+  `;
+
+
+  button.style.display =
+    "none";
+
+}
+
+
+/*
+ * Loading.
+ */
+function showLoading() {
+
+  const box =
+    document.getElementById(
+      "result"
+    );
+
+  const title =
+    document.getElementById(
+      "resultTitle"
+    );
+
+  const content =
+    document.getElementById(
+      "resultContent"
+    );
+
+
+  box.style.display =
+    "block";
+
+  box.className =
+    "result";
+
+  title.textContent =
+    "Checking...";
+
+  content.innerHTML =
+    "<p>Looking up registration...</p>";
+
+}
+
+
+/*
+ * Error.
+ */
+function showError(
+  message
+) {
+
+  const box =
+    document.getElementById(
+      "result"
+    );
+
+  const title =
+    document.getElementById(
+      "resultTitle"
+    );
+
+  const content =
+    document.getElementById(
+      "resultContent"
+    );
+
+
+  box.style.display =
+    "block";
+
+  box.className =
+    "result error";
+
+  title.textContent =
+    "❌ ERROR";
+
+  content.innerHTML =
+    `<p>${escapeHtml(
+      message
+    )}</p>`;
+
+}
+
+
+/*
+ * Reset.
+ */
+function resetPage() {
+
+  currentRegistration =
+    null;
+
+  document.getElementById(
+    "result"
+  ).style.display = "none";
+
+  document.getElementById(
+    "manualId"
+  ).value = "";
+
+
+  document.getElementById(
+    "startButton"
+  ).style.display = "block";
+
+  document.getElementById(
+    "startButton"
+  ).disabled = false;
+
+}
+
+
+/*
+ * Escape HTML.
+ */
+function escapeHtml(text) {
+
+  const div =
+    document.createElement(
+      "div"
+    );
+
+  div.textContent =
+    text;
+
+  return div.innerHTML;
+
+}
+
+</script>
+
+</body>
+</html>
